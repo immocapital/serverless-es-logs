@@ -203,29 +203,29 @@ class ServerlessEsLogsPlugin {
 
       const normalizedFunctionName = this.provider.naming.getNormalizedFunctionName(name);
       const subscriptionLogicalId = `${normalizedFunctionName}SubscriptionFilter`;
-      const permissionLogicalId = `${normalizedFunctionName}CWPermission`;
+      // const permissionLogicalId = `${normalizedFunctionName}CWPermission`;
       const logGroupLogicalId = `${normalizedFunctionName}LogGroup`;
       const logGroupName = template.Resources[logGroupLogicalId].Properties.LogGroupName;
 
       // Create permission for subscription filter
-      const permission = new LambdaPermissionBuilder()
-        .withFunctionName({
-          'Fn::GetAtt': [
-            this.logProcesserLogicalId,
-            'Arn',
-          ],
-        })
-        .withPrincipal({
-          'Fn::Sub': 'logs.${AWS::Region}.amazonaws.com',
-        })
-        .withSourceArn({
-          'Fn::GetAtt': [
-            logGroupLogicalId,
-            'Arn',
-          ],
-        })
-        .withDependsOn([ this.logProcesserLogicalId, logGroupLogicalId ])
-        .build();
+      // const permission = new LambdaPermissionBuilder()
+      //   .withFunctionName({
+      //     'Fn::GetAtt': [
+      //       this.logProcesserLogicalId,
+      //       'Arn',
+      //     ],
+      //   })
+      //   .withPrincipal({
+      //     'Fn::Sub': 'logs.${AWS::Region}.amazonaws.com',
+      //   })
+      //   .withSourceArn({
+      //     'Fn::GetAtt': [
+      //       logGroupLogicalId,
+      //       'Arn',
+      //     ],
+      //   })
+      //   .withDependsOn([ this.logProcesserLogicalId, logGroupLogicalId ])
+      //   .build();
 
       // Create subscription filter
       const subscriptionFilter = new SubscriptionFilterBuilder()
@@ -237,12 +237,12 @@ class ServerlessEsLogsPlugin {
         })
         .withFilterPattern(filterPattern)
         .withLogGroupName(logGroupName)
-        .withDependsOn([ this.logProcesserLogicalId, permissionLogicalId ])
+        .withDependsOn([ this.logProcesserLogicalId ])
         .build();
 
       // Create subscription template
       const subscriptionTemplate = new TemplateBuilder()
-        .withResource(permissionLogicalId, permission)
+        // .withResource(permissionLogicalId, permission)
         .withResource(subscriptionLogicalId, subscriptionFilter)
         .build();
 
