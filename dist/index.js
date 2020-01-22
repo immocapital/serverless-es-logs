@@ -205,7 +205,7 @@ class ServerlessEsLogsPlugin {
             })
                 .withFilterPattern(filterPattern)
                 .withLogGroupName(logGroupName)
-                .withDependsOn([this.logProcesserLogicalId])
+                .withDependsOn([this.logProcesserLogicalId, logGroupLogicalId])
                 .build();
             // Create subscription template
             const subscriptionTemplate = new utils_1.TemplateBuilder()
