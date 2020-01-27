@@ -47,7 +47,7 @@ describe('serverless-es-logs :: Plugin tests', () => {
         Type: 'AWS::Logs::LogGroup',
       };
     }
-    plugin = new ServerlessEsLogsPlugin(serverless, options);       
+    plugin = new ServerlessEsLogsPlugin(serverless, options);
   };
 
   describe('#hooks', () => {
@@ -69,7 +69,7 @@ describe('serverless-es-logs :: Plugin tests', () => {
             'ERROR: No configuration provided for serverless-es-logs!',
           );
         });
-  
+
         it('should throw an error if missing option \'endpoint\'', () => {
           const opts = {
             service: {
@@ -87,7 +87,7 @@ describe('serverless-es-logs :: Plugin tests', () => {
             'ERROR: Must define an endpoint for serverless-es-logs!',
           );
         });
-  
+
         it('should throw an error if missing option \'index\'', () => {
           const opts = {
             service: {
@@ -273,15 +273,15 @@ describe('serverless-es-logs :: Plugin tests', () => {
           expect(permissions.length).to.equal(0);
         });
 
-        it('should create a subscription and permission per function', () => {
+        it('should create a subscription per function', () => {
           const numFunctions = random.number({ min: 1, max: 5 });
           addFunctions(numFunctions);
           const template = serverless.service.provider.compiledCloudFormationTemplate;
           plugin.hooks['aws:package:finalize:mergeCustomProviderResources']();
           const subscriptions = _.filter(template.Resources, (v, k) => v.Type === 'AWS::Logs::SubscriptionFilter');
-          const permissions = _.filter(template.Resources, (v, k) => v.Type === 'AWS::Lambda::Permission');
+          // const permissions = _.filter(template.Resources, (v, k) => v.Type === 'AWS::Lambda::Permission');
           expect(subscriptions.length).to.equal(numFunctions);
-          expect(permissions.length).to.equal(numFunctions);
+          // expect(permissions.length).to.equal(numFunctions);
         });
       });
 

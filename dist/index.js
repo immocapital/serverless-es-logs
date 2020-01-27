@@ -1,14 +1,26 @@
 "use strict";
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 const fs_extra_1 = __importDefault(require("fs-extra"));
 const lodash_1 = __importDefault(require("lodash"));
 const path_1 = __importDefault(require("path"));
+const axios_1 = __importDefault(require("axios"));
 const utils_1 = require("./utils");
 // tslint:disable:no-var-requires
 const iamLambdaTemplate = require('../templates/iam/lambda-role.json');
 const withXrayTracingPermissions = require('../templates/iam/withXrayTracingPermissions.js');
+const aws = require('aws-sdk');
+const aws_v4_signer = require('aws4');
 // tslint:enable:no-var-requires
 class ServerlessEsLogsPlugin {
     constructor(serverless, options) {
@@ -16,6 +28,7 @@ class ServerlessEsLogsPlugin {
         this.logProcesserName = 'esLogsProcesser';
         this.defaultLambdaFilterPattern = '[timestamp=*Z, request_id="*-*", event]';
         this.defaultApiGWFilterPattern = '[event]';
+        this.defaultUseApiGWPipeline = false;
         this.serverless = serverless;
         this.provider = serverless.getProvider('aws');
         this.options = options;
@@ -102,6 +115,85 @@ class ServerlessEsLogsPlugin {
             throw new this.serverless.classes.Error(`ERROR: Tags must be an object! You provided '${tags}'.`);
         }
     }
+    createApiGatewayElasticsearchPipeline() {
+        return __awaiter(this, void 0, void 0, function* () {
+            const { esLogs } = this.custom();
+            const endpoint = 'vpc-testing-logging-5dtldo2mk3wkq5tg24uzrbk7ya.eu-west-2.es.amazonaws.com'; // esLogs.endpoint;
+            const index = esLogs.index;
+            const useApiGWPipeline = esLogs.useApiGWPipeline || this.defaultUseApiGWPipeline;
+            const pipeline = 'ApiGatewayPipeline';
+            if (!useApiGWPipeline && false) {
+                return;
+            }
+            const sts = new aws.STS();
+            const session_token = yield sts.getSessionToken().promise();
+            const credentials = {
+                'secretAccessKey': session_token.Credentials.SecretAccessKey,
+                'accessKeyId': session_token.Credentials.AccessKeyId,
+                'sessionToken': session_token.Credentials.SessionToken,
+            };
+            const requestOptions = {
+                url: `https://${endpoint}/_ingest/pipeline/${pipeline}`,
+                method: 'GET',
+            };
+            const signed = aws_v4_signer.sign({
+                hostname: endpoint,
+                path: `/_ingest/pipeline/${pipeline}`
+            }, credentials);
+            requestOptions['headers'] = signed.headers;
+            try {
+                const pipelines = yield axios_1.default(requestOptions);
+                if (pipelines.status === 200) {
+                    this.serverless.cli.log(`Pipeline ${pipeline} already exists! Continuing...`);
+                    return;
+                }
+            }
+            catch (error) {
+                if (error.response.status === 404) {
+                    console.log(`Pipeline ${pipeline} successfully created!`);
+                }
+                else {
+                    throw new this.serverless.classes.Error(`ERROR: Failed to create pipeline '${pipeline}': ${error.message}.`);
+                }
+            }
+            const createPipelineRequestOptions = {
+                url: `https://${endpoint}/_ingest/pipeline/${pipeline}`,
+                method: 'PUT',
+                data: {
+                    "description": "Pipeline for structuring API Gateway logs.",
+                    "processors": [
+                        {
+                            "grok": {
+                                "field": "@message",
+                                "patterns": [
+                                    "^requestId: %{UUID:requestId}, ip: %{IP:ip}, caller: %{GREEDYDATA:caller}, user: %{USER:user}, requestTime: %{HTTPDATE:requestTime}, httpMethod: %{WORD:httpMethod}, resourcePath: %{URIPATHPARAM:resourcePath}, status: %{NUMBER:status}, protocol: %{GREEDYDATA:protocol}, responseLength: %{NUMBER:responseLength}$",
+                                    "${GREEDYDATA}"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            };
+            const signedPip = aws_v4_signer.sign({
+                hostname: endpoint,
+                path: `/_ingest/pipeline/${pipeline}`,
+                method: 'PUT',
+                body: JSON.stringify(createPipelineRequestOptions.data),
+                headers: createPipelineRequestOptions.headers
+            }, credentials);
+            createPipelineRequestOptions['headers'] = signedPip.headers;
+            try {
+                yield axios_1.default(createPipelineRequestOptions);
+                this.serverless.cli.log(`Pipeline ${pipeline} already exists! Continuing...`);
+            }
+            catch (error) {
+                throw error;
+            }
+        });
+    }
     addApiGwCloudwatchSubscription() {
         const { esLogs } = this.custom();
         const filterPattern = esLogs.apiGWFilterPattern || this.defaultApiGWFilterPattern;
@@ -109,56 +201,58 @@ class ServerlessEsLogsPlugin {
         const template = this.serverless.service.provider.compiledCloudFormationTemplate;
         // Check if API Gateway log group exists
         /* istanbul ignore else */
-        if (template && template.Resources[apiGwLogGroupLogicalId]) {
-            const { LogGroupName } = template.Resources[apiGwLogGroupLogicalId].Properties;
-            const subscriptionLogicalId = `${apiGwLogGroupLogicalId}SubscriptionFilter`;
-            const permissionLogicalId = `${apiGwLogGroupLogicalId}CWPermission`;
-            const processorFunctionName = template.Resources[this.logProcesserLogicalId].Properties.FunctionName;
-            // Create permission for subscription filter
-            const permission = new utils_1.LambdaPermissionBuilder()
-                .withFunctionName(processorFunctionName)
-                .withPrincipal({
-                'Fn::Sub': 'logs.${AWS::Region}.amazonaws.com',
-            })
-                .withSourceArn({
-                'Fn::Join': [
-                    '',
-                    [
-                        'arn:aws:logs:',
-                        {
-                            Ref: 'AWS::Region',
-                        },
-                        ':',
-                        {
-                            Ref: 'AWS::AccountId',
-                        },
-                        ':log-group:',
-                        LogGroupName,
-                        '*',
+        this.createApiGatewayElasticsearchPipeline().then(() => {
+            if (template && template.Resources[apiGwLogGroupLogicalId]) {
+                const { LogGroupName } = template.Resources[apiGwLogGroupLogicalId].Properties;
+                const subscriptionLogicalId = `${apiGwLogGroupLogicalId}SubscriptionFilter`;
+                const permissionLogicalId = `${apiGwLogGroupLogicalId}CWPermission`;
+                const processorFunctionName = template.Resources[this.logProcesserLogicalId].Properties.FunctionName;
+                // Create permission for subscription filter
+                const permission = new utils_1.LambdaPermissionBuilder()
+                    .withFunctionName(processorFunctionName)
+                    .withPrincipal({
+                    'Fn::Sub': 'logs.${AWS::Region}.amazonaws.com',
+                })
+                    .withSourceArn({
+                    'Fn::Join': [
+                        '',
+                        [
+                            'arn:aws:logs:',
+                            {
+                                Ref: 'AWS::Region',
+                            },
+                            ':',
+                            {
+                                Ref: 'AWS::AccountId',
+                            },
+                            ':log-group:',
+                            LogGroupName,
+                            '*',
+                        ],
                     ],
-                ],
-            })
-                .withDependsOn([this.logProcesserLogicalId, apiGwLogGroupLogicalId])
-                .build();
-            // Create subscription filter
-            const subscriptionFilter = new utils_1.SubscriptionFilterBuilder()
-                .withDestinationArn({
-                'Fn::GetAtt': [
-                    this.logProcesserLogicalId,
-                    'Arn',
-                ],
-            })
-                .withFilterPattern(filterPattern)
-                .withLogGroupName(LogGroupName)
-                .withDependsOn([this.logProcesserLogicalId, permissionLogicalId])
-                .build();
-            // Create subscription template
-            const subscriptionTemplate = new utils_1.TemplateBuilder()
-                .withResource(permissionLogicalId, permission)
-                .withResource(subscriptionLogicalId, subscriptionFilter)
-                .build();
-            lodash_1.default.merge(template, subscriptionTemplate);
-        }
+                })
+                    .withDependsOn([this.logProcesserLogicalId, apiGwLogGroupLogicalId])
+                    .build();
+                // Create subscription filter
+                const subscriptionFilter = new utils_1.SubscriptionFilterBuilder()
+                    .withDestinationArn({
+                    'Fn::GetAtt': [
+                        this.logProcesserLogicalId,
+                        'Arn',
+                    ],
+                })
+                    .withFilterPattern(filterPattern)
+                    .withLogGroupName(LogGroupName)
+                    .withDependsOn([this.logProcesserLogicalId, permissionLogicalId])
+                    .build();
+                // Create subscription template
+                const subscriptionTemplate = new utils_1.TemplateBuilder()
+                    .withResource(permissionLogicalId, permission)
+                    .withResource(subscriptionLogicalId, subscriptionFilter)
+                    .build();
+                lodash_1.default.merge(template, subscriptionTemplate);
+            }
+        });
     }
     addLambdaCloudwatchSubscriptions() {
         const { esLogs } = this.custom();
@@ -205,7 +299,7 @@ class ServerlessEsLogsPlugin {
             })
                 .withFilterPattern(filterPattern)
                 .withLogGroupName(logGroupName)
-                .withDependsOn([this.logProcesserLogicalId, logGroupLogicalId])
+                .withDependsOn([this.logProcesserLogicalId])
                 .build();
             // Create subscription template
             const subscriptionTemplate = new utils_1.TemplateBuilder()
@@ -224,18 +318,20 @@ class ServerlessEsLogsPlugin {
         });
     }
     addLogProcesser() {
-        const { index, endpoint, tags } = this.custom().esLogs;
+        const { index, endpoint, tags, useApiGWPipeline } = this.custom().esLogs;
         const tagsStringified = tags ? JSON.stringify(tags) : /* istanbul ignore next */ '';
         const dirPath = path_1.default.join(this.serverless.config.servicePath, this.logProcesserDir);
         const filePath = path_1.default.join(dirPath, 'index.js');
         const handler = `${this.logProcesserDir}/index.handler`;
         const name = `${this.serverless.service.service}-${this.options.stage}-es-logs-plugin`;
+        const apiGatewayPipelineName = useApiGWPipeline ? 'ApiGatewayPipeline' : '';
         fs_extra_1.default.ensureDirSync(dirPath);
         fs_extra_1.default.copySync(path_1.default.resolve(__dirname, '../templates/code/logsToEs.js'), filePath);
         this.serverless.service.functions[this.logProcesserName] = {
             description: 'Serverless ES Logs Plugin',
             environment: {
                 ES_ENDPOINT: endpoint,
+                ES_APIGATEWAY_PIPELINE: apiGatewayPipelineName,
                 ES_INDEX_PREFIX: index,
                 ES_TAGS: tagsStringified,
             },
