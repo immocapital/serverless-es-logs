@@ -10,6 +10,7 @@ declare class ServerlessEsLogsPlugin {
     private logProcesserLogicalId;
     private defaultLambdaFilterPattern;
     private defaultApiGWFilterPattern;
+    private defaultUseApiGWPipeline;
     constructor(serverless: any, options: {
         [name: string]: any;
     });
@@ -19,6 +20,7 @@ declare class ServerlessEsLogsPlugin {
     private mergeCustomProviderResources;
     private formatCommandLineOpts;
     private validatePluginOptions;
+    private createApiGatewayElasticsearchPipeline;
     private addApiGwCloudwatchSubscription;
     private addLambdaCloudwatchSubscriptions;
     private configureLogRetention;
