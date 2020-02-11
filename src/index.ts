@@ -21,7 +21,7 @@ class ServerlessEsLogsPlugin {
   private logProcesserLogicalId: string;
   private defaultLambdaFilterPattern: string = '[timestamp=*Z, request_id="*-*", event]';
   private defaultApiGWFilterPattern: string = '[event]';
-  private defaultuseApiGatewayPipeline: boolean = false;
+  private defaultUseApiGatewayPipeline: boolean = false;
 
   constructor(serverless: any, options: { [name: string]: any }) {
     this.serverless = serverless;
@@ -59,7 +59,7 @@ class ServerlessEsLogsPlugin {
     this.addLogProcesser();
   }
 
-  private mergeCustomProviderResources(): void {
+  private async mergeCustomProviderResources(): Promise<void> {
     this.serverless.cli.log('ServerlessEsLogsPlugin.mergeCustomProviderResources()');
     const { includeApiGWLogs, retentionInDays, useDefaultRole, xrayTracingPermissions } = this.custom().esLogs;
     const template = this.serverless.service.provider.compiledCloudFormationTemplate;
@@ -92,7 +92,7 @@ class ServerlessEsLogsPlugin {
 
     // Add cloudwatch subscription for API Gateway logs
     if (includeApiGWLogs === true) {
-      this.addApiGwCloudwatchSubscription();
+      await this.addApiGwCloudwatchSubscription();
     }
   }
 
@@ -130,7 +130,7 @@ class ServerlessEsLogsPlugin {
   private async createApiGatewayElasticsearchPipeline(): Promise<void> {
     const { esLogs } = this.custom();
     const endpoint = esLogs.endpoint;
-    const useApiGatewayPipeline = esLogs.useApiGatewayPipeline || this.defaultuseApiGatewayPipeline;
+    const useApiGatewayPipeline = esLogs.useApiGatewayPipeline || this.defaultUseApiGatewayPipeline;
     const pipeline = 'ApiGatewayPipeline';
 
     if (!useApiGatewayPipeline) {
@@ -215,7 +215,7 @@ class ServerlessEsLogsPlugin {
     this.serverless.cli.log(`Pipeline ${pipeline} successfully created!`);
   }
 
-  private addApiGwCloudwatchSubscription(): void {
+  private async addApiGwCloudwatchSubscription(): Promise<void> {
     const { esLogs } = this.custom();
     const filterPattern = esLogs.apiGWFilterPattern || this.defaultApiGWFilterPattern;
     const apiGwLogGroupLogicalId = 'ApiGatewayLogGroup';
@@ -223,62 +223,62 @@ class ServerlessEsLogsPlugin {
 
     // Check if API Gateway log group exists
     /* istanbul ignore else */
-    this.createApiGatewayElasticsearchPipeline().then(() => {
-      if (template && template.Resources[apiGwLogGroupLogicalId]) {
-        const { LogGroupName } = template.Resources[apiGwLogGroupLogicalId].Properties;
-        const subscriptionLogicalId = `${apiGwLogGroupLogicalId}SubscriptionFilter`;
-        const permissionLogicalId = `${apiGwLogGroupLogicalId}CWPermission`;
-        const processorFunctionName = template.Resources[this.logProcesserLogicalId].Properties.FunctionName;
+    await this.createApiGatewayElasticsearchPipeline();
 
-        // Create permission for subscription filter
-        const permission = new LambdaPermissionBuilder()
-          .withFunctionName(processorFunctionName)
-          .withPrincipal({
-            'Fn::Sub': 'logs.${AWS::Region}.amazonaws.com',
-          })
-          .withSourceArn({
-            'Fn::Join': [
-              '',
-              [
-                'arn:aws:logs:',
-                {
-                  Ref: 'AWS::Region',
-                },
-                ':',
-                {
-                  Ref: 'AWS::AccountId',
-                },
-                ':log-group:',
-                LogGroupName,
-                '*',
-              ],
+    if (template && template.Resources[apiGwLogGroupLogicalId]) {
+      const { LogGroupName } = template.Resources[apiGwLogGroupLogicalId].Properties;
+      const subscriptionLogicalId = `${apiGwLogGroupLogicalId}SubscriptionFilter`;
+      const permissionLogicalId = `${apiGwLogGroupLogicalId}CWPermission`;
+      const processorFunctionName = template.Resources[this.logProcesserLogicalId].Properties.FunctionName;
+
+      // Create permission for subscription filter
+      const permission = new LambdaPermissionBuilder()
+        .withFunctionName(processorFunctionName)
+        .withPrincipal({
+          'Fn::Sub': 'logs.${AWS::Region}.amazonaws.com',
+        })
+        .withSourceArn({
+          'Fn::Join': [
+            '',
+            [
+              'arn:aws:logs:',
+              {
+                Ref: 'AWS::Region',
+              },
+              ':',
+              {
+                Ref: 'AWS::AccountId',
+              },
+              ':log-group:',
+              LogGroupName,
+              '*',
             ],
-          })
-          .withDependsOn([ this.logProcesserLogicalId, apiGwLogGroupLogicalId ])
-          .build();
+          ],
+        })
+        .withDependsOn([ this.logProcesserLogicalId, apiGwLogGroupLogicalId ])
+        .build();
 
-        // Create subscription filter
-        const subscriptionFilter = new SubscriptionFilterBuilder()
-          .withDestinationArn({
-            'Fn::GetAtt': [
-              this.logProcesserLogicalId,
-              'Arn',
-            ],
-          })
-          .withFilterPattern(filterPattern)
-          .withLogGroupName(LogGroupName)
-          .withDependsOn([ this.logProcesserLogicalId, permissionLogicalId ])
-          .build();
+      // Create subscription filter
+      const subscriptionFilter = new SubscriptionFilterBuilder()
+        .withDestinationArn({
+          'Fn::GetAtt': [
+            this.logProcesserLogicalId,
+            'Arn',
+          ],
+        })
+        .withFilterPattern(filterPattern)
+        .withLogGroupName(LogGroupName)
+        .withDependsOn([ this.logProcesserLogicalId, permissionLogicalId ])
+        .build();
 
-        // Create subscription template
-        const subscriptionTemplate = new TemplateBuilder()
-          .withResource(permissionLogicalId, permission)
-          .withResource(subscriptionLogicalId, subscriptionFilter)
-          .build();
+      // Create subscription template
+      const subscriptionTemplate = new TemplateBuilder()
+        .withResource(permissionLogicalId, permission)
+        .withResource(subscriptionLogicalId, subscriptionFilter)
+        .build();
 
-        _.merge(template, subscriptionTemplate);
-      }
-    });
+      _.merge(template, subscriptionTemplate);
+    }
   }
 
   private addLambdaCloudwatchSubscriptions(): void {

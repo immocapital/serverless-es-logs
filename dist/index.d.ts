@@ -10,7 +10,7 @@ declare class ServerlessEsLogsPlugin {
     private logProcesserLogicalId;
     private defaultLambdaFilterPattern;
     private defaultApiGWFilterPattern;
-    private defaultUseApiGWPipeline;
+    private defaultUseApiGatewayPipeline;
     constructor(serverless: any, options: {
         [name: string]: any;
     });
