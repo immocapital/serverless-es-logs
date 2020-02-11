@@ -28,7 +28,7 @@ class ServerlessEsLogsPlugin {
         this.logProcesserName = 'esLogsProcesser';
         this.defaultLambdaFilterPattern = '[timestamp=*Z, request_id="*-*", event]';
         this.defaultApiGWFilterPattern = '[event]';
-        this.defaultUseApiGWPipeline = false;
+        this.defaultUseApiGatewayPipeline = false;
         this.serverless = serverless;
         this.provider = serverless.getProvider('aws');
         this.options = options;
@@ -60,34 +60,36 @@ class ServerlessEsLogsPlugin {
         this.addLogProcesser();
     }
     mergeCustomProviderResources() {
-        this.serverless.cli.log('ServerlessEsLogsPlugin.mergeCustomProviderResources()');
-        const { includeApiGWLogs, retentionInDays, useDefaultRole, xrayTracingPermissions } = this.custom().esLogs;
-        const template = this.serverless.service.provider.compiledCloudFormationTemplate;
-        // Add cloudwatch subscriptions to firehose for functions' log groups
-        this.addLambdaCloudwatchSubscriptions();
-        // Configure Cloudwatch log retention
-        if (retentionInDays !== undefined) {
-            this.configureLogRetention(retentionInDays);
-        }
-        // Add xray permissions if option is enabled
-        if (xrayTracingPermissions === true) {
-            const statement = iamLambdaTemplate.ServerlessEsLogsLambdaIAMRole.Properties.Policies[0].PolicyDocument.Statement;
-            statement.push(withXrayTracingPermissions);
-        }
-        // Add IAM role for cloudwatch -> elasticsearch lambda
-        if (this.serverless.service.provider.role && !useDefaultRole) {
-            lodash_1.default.merge(template.Resources, iamLambdaTemplate);
-            this.patchLogProcesserRole();
-        }
-        else if (!this.serverless.service.provider.role) {
-            // Merge log processor role policies into default role
-            const updatedPolicies = template.Resources.IamRoleLambdaExecution.Properties.Policies.concat(iamLambdaTemplate.ServerlessEsLogsLambdaIAMRole.Properties.Policies);
-            template.Resources.IamRoleLambdaExecution.Properties.Policies = updatedPolicies;
-        }
-        // Add cloudwatch subscription for API Gateway logs
-        if (includeApiGWLogs === true) {
-            this.addApiGwCloudwatchSubscription();
-        }
+        return __awaiter(this, void 0, void 0, function* () {
+            this.serverless.cli.log('ServerlessEsLogsPlugin.mergeCustomProviderResources()');
+            const { includeApiGWLogs, retentionInDays, useDefaultRole, xrayTracingPermissions } = this.custom().esLogs;
+            const template = this.serverless.service.provider.compiledCloudFormationTemplate;
+            // Add cloudwatch subscriptions to firehose for functions' log groups
+            this.addLambdaCloudwatchSubscriptions();
+            // Configure Cloudwatch log retention
+            if (retentionInDays !== undefined) {
+                this.configureLogRetention(retentionInDays);
+            }
+            // Add xray permissions if option is enabled
+            if (xrayTracingPermissions === true) {
+                const statement = iamLambdaTemplate.ServerlessEsLogsLambdaIAMRole.Properties.Policies[0].PolicyDocument.Statement;
+                statement.push(withXrayTracingPermissions);
+            }
+            // Add IAM role for cloudwatch -> elasticsearch lambda
+            if (this.serverless.service.provider.role && !useDefaultRole) {
+                lodash_1.default.merge(template.Resources, iamLambdaTemplate);
+                this.patchLogProcesserRole();
+            }
+            else if (!this.serverless.service.provider.role) {
+                // Merge log processor role policies into default role
+                const updatedPolicies = template.Resources.IamRoleLambdaExecution.Properties.Policies.concat(iamLambdaTemplate.ServerlessEsLogsLambdaIAMRole.Properties.Policies);
+                template.Resources.IamRoleLambdaExecution.Properties.Policies = updatedPolicies;
+            }
+            // Add cloudwatch subscription for API Gateway logs
+            if (includeApiGWLogs === true) {
+                yield this.addApiGwCloudwatchSubscription();
+            }
+        });
     }
     formatCommandLineOpts() {
         this.options.stage = this.options.stage
@@ -118,11 +120,10 @@ class ServerlessEsLogsPlugin {
     createApiGatewayElasticsearchPipeline() {
         return __awaiter(this, void 0, void 0, function* () {
             const { esLogs } = this.custom();
-            const endpoint = 'vpc-testing-logging-5dtldo2mk3wkq5tg24uzrbk7ya.eu-west-2.es.amazonaws.com'; // esLogs.endpoint;
-            const index = esLogs.index;
-            const useApiGWPipeline = esLogs.useApiGWPipeline || this.defaultUseApiGWPipeline;
+            const endpoint = esLogs.endpoint;
+            const useApiGatewayPipeline = esLogs.useApiGatewayPipeline || this.defaultUseApiGatewayPipeline;
             const pipeline = 'ApiGatewayPipeline';
-            if (!useApiGWPipeline && false) {
+            if (!useApiGatewayPipeline) {
                 return;
             }
             const sts = new aws.STS();
@@ -150,7 +151,7 @@ class ServerlessEsLogsPlugin {
             }
             catch (error) {
                 if (error.response.status === 404) {
-                    console.log(`Pipeline ${pipeline} successfully created!`);
+                    this.serverless.cli.log(`Creating pipeline ${pipeline}...`);
                 }
                 else {
                     throw new this.serverless.classes.Error(`ERROR: Failed to create pipeline '${pipeline}': ${error.message}.`);
@@ -187,21 +188,22 @@ class ServerlessEsLogsPlugin {
             createPipelineRequestOptions['headers'] = signedPip.headers;
             try {
                 yield axios_1.default(createPipelineRequestOptions);
-                this.serverless.cli.log(`Pipeline ${pipeline} already exists! Continuing...`);
             }
             catch (error) {
                 throw error;
             }
+            this.serverless.cli.log(`Pipeline ${pipeline} successfully created!`);
         });
     }
     addApiGwCloudwatchSubscription() {
-        const { esLogs } = this.custom();
-        const filterPattern = esLogs.apiGWFilterPattern || this.defaultApiGWFilterPattern;
-        const apiGwLogGroupLogicalId = 'ApiGatewayLogGroup';
-        const template = this.serverless.service.provider.compiledCloudFormationTemplate;
-        // Check if API Gateway log group exists
-        /* istanbul ignore else */
-        this.createApiGatewayElasticsearchPipeline().then(() => {
+        return __awaiter(this, void 0, void 0, function* () {
+            const { esLogs } = this.custom();
+            const filterPattern = esLogs.apiGWFilterPattern || this.defaultApiGWFilterPattern;
+            const apiGwLogGroupLogicalId = 'ApiGatewayLogGroup';
+            const template = this.serverless.service.provider.compiledCloudFormationTemplate;
+            // Check if API Gateway log group exists
+            /* istanbul ignore else */
+            yield this.createApiGatewayElasticsearchPipeline();
             if (template && template.Resources[apiGwLogGroupLogicalId]) {
                 const { LogGroupName } = template.Resources[apiGwLogGroupLogicalId].Properties;
                 const subscriptionLogicalId = `${apiGwLogGroupLogicalId}SubscriptionFilter`;
@@ -299,7 +301,7 @@ class ServerlessEsLogsPlugin {
             })
                 .withFilterPattern(filterPattern)
                 .withLogGroupName(logGroupName)
-                .withDependsOn([this.logProcesserLogicalId])
+                .withDependsOn([this.logProcesserLogicalId, logGroupLogicalId])
                 .build();
             // Create subscription template
             const subscriptionTemplate = new utils_1.TemplateBuilder()
@@ -318,13 +320,13 @@ class ServerlessEsLogsPlugin {
         });
     }
     addLogProcesser() {
-        const { index, endpoint, tags, useApiGWPipeline } = this.custom().esLogs;
+        const { index, endpoint, tags, useApiGatewayPipeline } = this.custom().esLogs;
         const tagsStringified = tags ? JSON.stringify(tags) : /* istanbul ignore next */ '';
         const dirPath = path_1.default.join(this.serverless.config.servicePath, this.logProcesserDir);
         const filePath = path_1.default.join(dirPath, 'index.js');
         const handler = `${this.logProcesserDir}/index.handler`;
         const name = `${this.serverless.service.service}-${this.options.stage}-es-logs-plugin`;
-        const apiGatewayPipelineName = useApiGWPipeline ? 'ApiGatewayPipeline' : '';
+        const apiGatewayPipelineName = useApiGatewayPipeline ? 'ApiGatewayPipeline' : '';
         fs_extra_1.default.ensureDirSync(dirPath);
         fs_extra_1.default.copySync(path_1.default.resolve(__dirname, '../templates/code/logsToEs.js'), filePath);
         this.serverless.service.functions[this.logProcesserName] = {
