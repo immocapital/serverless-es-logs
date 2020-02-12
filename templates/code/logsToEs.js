@@ -228,12 +228,12 @@ function buildRequest(endpoint, body) {
     var kRegion = hmac(kDate, region);
     var kService = hmac(kRegion, service);
     var kSigning = hmac(kService, 'aws4_request');
-    var path = '/_bulk' + (apiGatewayPipeline ? `?pipeline=${apiGatewayPipeline}` : '')
+    var path = '/_bulk';
 
     var request = {
         host: endpoint,
         method: 'POST',
-        path: path,
+        path: path + (apiGatewayPipeline ? `?pipeline=${apiGatewayPipeline}` : ''),
         body: body,
         headers: {
             'Content-Type': 'application/json',
@@ -256,7 +256,7 @@ function buildRequest(endpoint, body) {
 
     var canonicalString = [
         request.method,
-        request.path, '',
+        path, '',
         canonicalHeaders, '',
         signedHeaders,
         hash(request.body, 'hex'),
