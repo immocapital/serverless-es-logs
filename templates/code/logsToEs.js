@@ -2,6 +2,7 @@
 var https = require('https');
 var zlib = require('zlib');
 var crypto = require('crypto');
+var qs = require('querystring');
 
 var endpoint = process.env.ES_ENDPOINT;
 var indexPrefix = process.env.ES_INDEX_PREFIX;
@@ -230,10 +231,15 @@ function buildRequest(endpoint, body) {
     var kSigning = hmac(kService, 'aws4_request');
     var path = '/_bulk';
 
+    var queryString = ''
+    if (apiGatewayPipeline) {
+        queryString = qs.stringify({'pipeline': apiGatewayPipeline});
+    }
+
     var request = {
         host: endpoint,
         method: 'POST',
-        path: path + (apiGatewayPipeline ? `?pipeline=${apiGatewayPipeline}` : ''),
+        path: path + (queryString ? ('?' + queryString) : ''),
         body: body,
         headers: {
             'Content-Type': 'application/json',
@@ -256,7 +262,8 @@ function buildRequest(endpoint, body) {
 
     var canonicalString = [
         request.method,
-        path, '',
+        path,
+        queryString,
         canonicalHeaders, '',
         signedHeaders,
         hash(request.body, 'hex'),
