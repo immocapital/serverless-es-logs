@@ -264,7 +264,7 @@ function buildRequest(endpoint, body) {
         request.method,
         path,
         queryString,
-        canonicalHeaders,
+        canonicalHeaders, '',
         signedHeaders,
         hash(request.body, 'hex'),
     ].join('\n');
