@@ -156,7 +156,7 @@ class ServerlessEsLogsPlugin {
               "field": "@message",
               "patterns": [
                 "^requestId: %{UUID:requestId}, ip: %{IP:ip}, caller: %{GREEDYDATA:caller}, user: %{USER:user}, requestTime: %{HTTPDATE:requestTime}, httpMethod: %{WORD:httpMethod}, resourcePath: %{URIPATHPARAM:resourcePath}, status: %{NUMBER:status:int}, protocol: %{GREEDYDATA:protocol}, responseLength: %{NUMBER:responseLength:int}$",
-                "${GREEDYDATA}"
+                "%{GREEDYDATA}"
               ]
             }
           }
