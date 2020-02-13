@@ -145,32 +145,6 @@ class ServerlessEsLogsPlugin {
       'sessionToken': session_token.Credentials.SessionToken,
     }
 
-    const requestOptions: AxiosRequestConfig = {
-      url: `https://${endpoint}/_ingest/pipeline/${pipeline}`,
-      method: 'GET',
-    };
-
-    const signed = aws_v4_signer.sign({
-      hostname: endpoint,
-      path: `/_ingest/pipeline/${pipeline}`
-    }, credentials);
-
-    requestOptions['headers'] = signed.headers;
-
-    try {
-      const pipelines = await axios(requestOptions);
-      if ( pipelines.status === 200) {
-        this.serverless.cli.log(`Pipeline ${pipeline} already exists! Continuing...`);
-        return
-      }
-    } catch (error) {
-      if (error.response.status === 404) {
-        this.serverless.cli.log(`Creating pipeline ${pipeline}...`);
-      } else {
-        throw new this.serverless.classes.Error(`ERROR: Failed to create pipeline '${pipeline}': ${error.message}.`);
-      }
-    }
-
     const createPipelineRequestOptions: AxiosRequestConfig = {
       url: `https://${endpoint}/_ingest/pipeline/${pipeline}`,
       method: 'PUT',
@@ -181,7 +155,7 @@ class ServerlessEsLogsPlugin {
             "grok": {
               "field": "@message",
               "patterns": [
-                "^requestId: %{UUID:requestId}, ip: %{IP:ip}, caller: %{GREEDYDATA:caller}, user: %{USER:user}, requestTime: %{HTTPDATE:requestTime}, httpMethod: %{WORD:httpMethod}, resourcePath: %{URIPATHPARAM:resourcePath}, status: %{NUMBER:status}, protocol: %{GREEDYDATA:protocol}, responseLength: %{NUMBER:responseLength}$",
+                "^requestId: %{UUID:requestId}, ip: %{IP:ip}, caller: %{GREEDYDATA:caller}, user: %{USER:user}, requestTime: %{HTTPDATE:requestTime}, httpMethod: %{WORD:httpMethod}, resourcePath: %{URIPATHPARAM:resourcePath}, status: %{NUMBER:status:int}, protocol: %{GREEDYDATA:protocol}, responseLength: %{NUMBER:responseLength:int}$",
                 "${GREEDYDATA}"
               ]
             }
@@ -193,7 +167,7 @@ class ServerlessEsLogsPlugin {
       }
     };
 
-    const signedPip = aws_v4_signer.sign(
+    const signedPipelineRequest = aws_v4_signer.sign(
       {
         hostname: endpoint,
         path: `/_ingest/pipeline/${pipeline}`,
@@ -204,7 +178,7 @@ class ServerlessEsLogsPlugin {
       credentials
     );
 
-    createPipelineRequestOptions['headers'] = signedPip.headers;
+    createPipelineRequestOptions['headers'] = signedPipelineRequest.headers;
 
     try {
       await axios(createPipelineRequestOptions);
