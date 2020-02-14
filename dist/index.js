@@ -28,7 +28,6 @@ class ServerlessEsLogsPlugin {
         this.logProcesserName = 'esLogsProcesser';
         this.defaultLambdaFilterPattern = '[timestamp=*Z, request_id="*-*", event]';
         this.defaultApiGWFilterPattern = '[event]';
-        this.defaultUseApiGatewayPipeline = false;
         this.serverless = serverless;
         this.provider = serverless.getProvider('aws');
         this.options = options;
@@ -121,10 +120,17 @@ class ServerlessEsLogsPlugin {
         return __awaiter(this, void 0, void 0, function* () {
             const { esLogs } = this.custom();
             const endpoint = esLogs.endpoint;
-            const useApiGatewayPipeline = esLogs.useApiGatewayPipeline || this.defaultUseApiGatewayPipeline;
-            const pipeline = 'ApiGatewayPipeline';
-            if (!useApiGatewayPipeline) {
+            const apiGatewayAccessLogsGrokPipeline = esLogs.apiGatewayAccessLogsGrokPipeline || {};
+            const pipeline = apiGatewayAccessLogsGrokPipeline.name;
+            const patterns = apiGatewayAccessLogsGrokPipeline.patterns || [];
+            if (!apiGatewayAccessLogsGrokPipeline) {
                 return;
+            }
+            if (!pipeline) {
+                throw new this.serverless.classes.Error(`ERROR: Must define a name for apiGatewayAccessLogsGrokPipeline!`);
+            }
+            if (!patterns) {
+                throw new this.serverless.classes.Error(`ERROR: Must define patterns for '${pipeline}' apiGatewayAccessLogsGrokPipeline.`);
             }
             const sts = new aws.STS();
             const session_token = yield sts.getSessionToken().promise();
@@ -137,15 +143,12 @@ class ServerlessEsLogsPlugin {
                 url: `https://${endpoint}/_ingest/pipeline/${pipeline}`,
                 method: 'PUT',
                 data: {
-                    "description": "Pipeline for structuring API Gateway logs.",
+                    "description": "Pipeline for structuring API Gateway Access logs.",
                     "processors": [
                         {
                             "grok": {
                                 "field": "@message",
-                                "patterns": [
-                                    "^requestId: %{UUID:requestId}, ip: %{IP:ip}, caller: %{GREEDYDATA:caller}, user: %{USER:user}, requestTime: %{HTTPDATE:requestTime}, httpMethod: %{WORD:httpMethod}, resourcePath: %{URIPATHPARAM:resourcePath}, status: %{NUMBER:status:int}, protocol: %{GREEDYDATA:protocol}, responseLength: %{NUMBER:responseLength:int}$",
-                                    "%{GREEDYDATA}"
-                                ]
+                                "patterns": patterns
                             }
                         }
                     ]
@@ -296,20 +299,20 @@ class ServerlessEsLogsPlugin {
         });
     }
     addLogProcesser() {
-        const { index, endpoint, tags, useApiGatewayPipeline } = this.custom().esLogs;
+        const { index, endpoint, tags, apiGatewayAccessLogsGrokPipeline } = this.custom().esLogs;
         const tagsStringified = tags ? JSON.stringify(tags) : /* istanbul ignore next */ '';
         const dirPath = path_1.default.join(this.serverless.config.servicePath, this.logProcesserDir);
         const filePath = path_1.default.join(dirPath, 'index.js');
         const handler = `${this.logProcesserDir}/index.handler`;
         const name = `${this.serverless.service.service}-${this.options.stage}-es-logs-plugin`;
-        const apiGatewayPipelineName = useApiGatewayPipeline ? 'ApiGatewayPipeline' : '';
+        const apiGatewayAccessLogsGrokPipelineName = apiGatewayAccessLogsGrokPipeline.name || '';
         fs_extra_1.default.ensureDirSync(dirPath);
         fs_extra_1.default.copySync(path_1.default.resolve(__dirname, '../templates/code/logsToEs.js'), filePath);
         this.serverless.service.functions[this.logProcesserName] = {
             description: 'Serverless ES Logs Plugin',
             environment: {
                 ES_ENDPOINT: endpoint,
-                ES_APIGATEWAY_PIPELINE: apiGatewayPipelineName,
+                ES_APIGATEWAY_PIPELINE: apiGatewayAccessLogsGrokPipelineName,
                 ES_INDEX_PREFIX: index,
                 ES_TAGS: tagsStringified,
             },
