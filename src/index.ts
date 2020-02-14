@@ -21,7 +21,6 @@ class ServerlessEsLogsPlugin {
   private logProcesserLogicalId: string;
   private defaultLambdaFilterPattern: string = '[timestamp=*Z, request_id="*-*", event]';
   private defaultApiGWFilterPattern: string = '[event]';
-  private defaultUseApiGatewayPipeline: boolean = false;
 
   constructor(serverless: any, options: { [name: string]: any }) {
     this.serverless = serverless;
@@ -130,11 +129,20 @@ class ServerlessEsLogsPlugin {
   private async createApiGatewayElasticsearchPipeline(): Promise<void> {
     const { esLogs } = this.custom();
     const endpoint = esLogs.endpoint;
-    const useApiGatewayPipeline = esLogs.useApiGatewayPipeline || this.defaultUseApiGatewayPipeline;
-    const pipeline = 'ApiGatewayPipeline';
+    const apiGatewayAccessLogsGrokPipeline = esLogs.apiGatewayAccessLogsGrokPipeline || {};
+    const pipeline = apiGatewayAccessLogsGrokPipeline.name
+    const patterns = apiGatewayAccessLogsGrokPipeline.patterns || [];
 
-    if (!useApiGatewayPipeline) {
-      return
+    if (!apiGatewayAccessLogsGrokPipeline) {
+      return;
+    }
+
+    if (!pipeline) {
+      throw new this.serverless.classes.Error(`ERROR: Must define a name for apiGatewayAccessLogsGrokPipeline!`);
+    }
+
+    if (!patterns) {
+      throw new this.serverless.classes.Error(`ERROR: Must define patterns for '${pipeline}' apiGatewayAccessLogsGrokPipeline.`);
     }
 
     const sts = new aws.STS();
@@ -149,15 +157,12 @@ class ServerlessEsLogsPlugin {
       url: `https://${endpoint}/_ingest/pipeline/${pipeline}`,
       method: 'PUT',
       data: {
-        "description" : "Pipeline for structuring API Gateway logs.",
+        "description" : "Pipeline for structuring API Gateway Access logs.",
         "processors": [
           {
             "grok": {
               "field": "@message",
-              "patterns": [
-                "^requestId: %{UUID:requestId}, ip: %{IP:ip}, caller: %{GREEDYDATA:caller}, user: %{USER:user}, requestTime: %{HTTPDATE:requestTime}, httpMethod: %{WORD:httpMethod}, resourcePath: %{URIPATHPARAM:resourcePath}, status: %{NUMBER:status:int}, protocol: %{GREEDYDATA:protocol}, responseLength: %{NUMBER:responseLength:int}$",
-                "%{GREEDYDATA}"
-              ]
+              "patterns": patterns
             }
           }
         ]
@@ -327,20 +332,20 @@ class ServerlessEsLogsPlugin {
   }
 
   private addLogProcesser(): void {
-    const { index, endpoint, tags, useApiGatewayPipeline } = this.custom().esLogs;
+    const { index, endpoint, tags, apiGatewayAccessLogsGrokPipeline } = this.custom().esLogs;
     const tagsStringified = tags ? JSON.stringify(tags) : /* istanbul ignore next */ '';
     const dirPath = path.join(this.serverless.config.servicePath, this.logProcesserDir);
     const filePath = path.join(dirPath, 'index.js');
     const handler = `${this.logProcesserDir}/index.handler`;
     const name = `${this.serverless.service.service}-${this.options.stage}-es-logs-plugin`;
-    const apiGatewayPipelineName = useApiGatewayPipeline ? 'ApiGatewayPipeline' : '';
+    const apiGatewayAccessLogsGrokPipelineName = apiGatewayAccessLogsGrokPipeline.name || '';
     fs.ensureDirSync(dirPath);
     fs.copySync(path.resolve(__dirname, '../templates/code/logsToEs.js'), filePath);
     this.serverless.service.functions[this.logProcesserName] = {
       description: 'Serverless ES Logs Plugin',
       environment: {
         ES_ENDPOINT: endpoint,
-        ES_APIGATEWAY_PIPELINE: apiGatewayPipelineName,
+        ES_APIGATEWAY_PIPELINE: apiGatewayAccessLogsGrokPipelineName,
         ES_INDEX_PREFIX: index,
         ES_TAGS: tagsStringified,
       },
