@@ -121,7 +121,7 @@ class ServerlessEsLogsPlugin {
             const { esLogs } = this.custom();
             const endpoint = esLogs.endpoint;
             const apiGatewayAccessLogsGrokPipeline = esLogs.apiGatewayAccessLogsGrokPipeline || {};
-            const pipeline = apiGatewayAccessLogsGrokPipeline.name;
+            const pipeline = apiGatewayAccessLogsGrokPipeline.name || '';
             const patterns = apiGatewayAccessLogsGrokPipeline.patterns || [];
             if (!apiGatewayAccessLogsGrokPipeline) {
                 return;
