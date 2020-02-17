@@ -119,13 +119,12 @@ class ServerlessEsLogsPlugin {
     createApiGatewayElasticsearchPipeline() {
         return __awaiter(this, void 0, void 0, function* () {
             const { esLogs } = this.custom();
-            const endpoint = esLogs.endpoint;
-            const apiGatewayAccessLogsGrokPipeline = esLogs.apiGatewayAccessLogsGrokPipeline || {};
-            const pipeline = apiGatewayAccessLogsGrokPipeline.name || '';
-            const patterns = apiGatewayAccessLogsGrokPipeline.patterns || [];
-            if (!apiGatewayAccessLogsGrokPipeline) {
+            if (!esLogs.apiGatewayAccessLogsGrokPipeline) {
                 return;
             }
+            const endpoint = esLogs.endpoint;
+            const pipeline = esLogs.apiGatewayAccessLogsGrokPipeline.name || '';
+            const patterns = esLogs.apiGatewayAccessLogsGrokPipeline.patterns || [];
             if (!pipeline) {
                 throw new this.serverless.classes.Error(`ERROR: Must define a name for apiGatewayAccessLogsGrokPipeline!`);
             }
@@ -299,12 +298,13 @@ class ServerlessEsLogsPlugin {
         });
     }
     addLogProcesser() {
-        const { index, endpoint, tags, apiGatewayAccessLogsGrokPipeline } = this.custom().esLogs;
+        const { index, endpoint, tags } = this.custom().esLogs;
         const tagsStringified = tags ? JSON.stringify(tags) : /* istanbul ignore next */ '';
         const dirPath = path_1.default.join(this.serverless.config.servicePath, this.logProcesserDir);
         const filePath = path_1.default.join(dirPath, 'index.js');
         const handler = `${this.logProcesserDir}/index.handler`;
         const name = `${this.serverless.service.service}-${this.options.stage}-es-logs-plugin`;
+        const apiGatewayAccessLogsGrokPipeline = this.custom().esLogs.apiGatewayAccessLogsGrokPipeline || {};
         const apiGatewayAccessLogsGrokPipelineName = apiGatewayAccessLogsGrokPipeline.name || '';
         fs_extra_1.default.ensureDirSync(dirPath);
         fs_extra_1.default.copySync(path_1.default.resolve(__dirname, '../templates/code/logsToEs.js'), filePath);
