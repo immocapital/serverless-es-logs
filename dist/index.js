@@ -119,17 +119,30 @@ class ServerlessEsLogsPlugin {
     createApiGatewayElasticsearchPipeline() {
         return __awaiter(this, void 0, void 0, function* () {
             const { esLogs } = this.custom();
-            if (!esLogs.apiGatewayAccessLogsGrokPipeline) {
+            if (!esLogs.pipeline) {
                 return;
             }
             const endpoint = esLogs.endpoint;
-            const pipeline = esLogs.apiGatewayAccessLogsGrokPipeline.name || '';
-            const patterns = esLogs.apiGatewayAccessLogsGrokPipeline.patterns || [];
+            const pipeline = esLogs.pipeline.name || '';
+            const processors = esLogs.pipeline.processors || [];
+            const description = esLogs.pipeline.description || '';
             if (!pipeline) {
-                throw new this.serverless.classes.Error(`ERROR: Must define a name for apiGatewayAccessLogsGrokPipeline!`);
+                throw new this.serverless.classes.Error(`ERROR: Must define a name for pipeline!`);
             }
-            if (!patterns) {
-                throw new this.serverless.classes.Error(`ERROR: Must define patterns for '${pipeline}' apiGatewayAccessLogsGrokPipeline.`);
+            if (!processors) {
+                throw new this.serverless.classes.Error(`ERROR: Must define processors for '${pipeline}' pipeline!`);
+            }
+            const formatted_processors = [];
+            for (const processor of processors) {
+                if (!processor.type) {
+                    throw new this.serverless.classes.Error(`ERROR: Missing attribute 'type' for processor!`);
+                }
+                if (!processor.options) {
+                    throw new this.serverless.classes.Error(`ERROR: Missing attribute 'options' for processor!`);
+                }
+                let formatted_processor = {};
+                formatted_processor[processor.type] = processor.options;
+                formatted_processors.push(formatted_processor);
             }
             const sts = new aws.STS();
             const session_token = yield sts.getSessionToken().promise();
@@ -142,20 +155,14 @@ class ServerlessEsLogsPlugin {
                 url: `https://${endpoint}/_ingest/pipeline/${pipeline}`,
                 method: 'PUT',
                 data: {
-                    "description": "Pipeline for structuring API Gateway Access logs.",
-                    "processors": [
-                        {
-                            "grok": {
-                                "field": "@message",
-                                "patterns": patterns
-                            }
-                        }
-                    ]
+                    "description": description || "Pipeline created by serverless-es-logs.",
+                    "processors": formatted_processors
                 },
                 headers: {
                     'Content-Type': 'application/json'
                 }
             };
+            console.log(JSON.stringify(createPipelineRequestOptions));
             const signedPipelineRequest = aws_v4_signer.sign({
                 hostname: endpoint,
                 path: `/_ingest/pipeline/${pipeline}`,
