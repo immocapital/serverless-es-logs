@@ -6,7 +6,7 @@ var qs = require('querystring');
 
 var endpoint = process.env.ES_ENDPOINT;
 var indexPrefix = process.env.ES_INDEX_PREFIX;
-var apiGatewayPipeline = process.env.ES_APIGATEWAY_PIPELINE;
+var pipeline = process.env.ES_PIPELINE;
 var tags = undefined;
 try {
     tags = JSON.parse(process.env.ES_TAGS);
@@ -232,8 +232,8 @@ function buildRequest(endpoint, body) {
     var path = '/_bulk';
 
     var queryString = ''
-    if (apiGatewayPipeline) {
-        queryString = qs.stringify({'pipeline': apiGatewayPipeline});
+    if (pipeline) {
+        queryString = qs.stringify({'pipeline': pipeline});
     }
 
     var request = {
