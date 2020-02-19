@@ -33,6 +33,7 @@ class ServerlessEsLogsPlugin {
       'after:package:initialize': this.afterPackageInitialize.bind(this),
       'after:package:createDeploymentArtifacts': this.afterPackageCreateDeploymentArtifacts.bind(this),
       'aws:package:finalize:mergeCustomProviderResources': this.mergeCustomProviderResources.bind(this),
+      'after:deploy:finalize': this.createElasticsearchPipeline.bind(this),
     };
     // tslint:enable:object-literal-sort-keys
   }
@@ -126,23 +127,23 @@ class ServerlessEsLogsPlugin {
     }
   }
 
-  private async createApiGatewayElasticsearchPipeline(): Promise<void> {
+  private async createElasticsearchPipeline(): Promise<void> {
     const { esLogs } = this.custom();
     if (!esLogs.pipeline) {
       return;
     }
 
-    const endpoint = esLogs.endpoint;
-    const pipeline = esLogs.pipeline.name || '';
-    const processors = esLogs.pipeline.processors || [];
-    const description = esLogs.pipeline.description || '';
+    const endpoint: string = esLogs.endpoint;
+    const pipeline_name: string = esLogs.pipeline.name || '';
+    const processors: any[] = esLogs.pipeline.processors || [];
+    const description: string = esLogs.pipeline.description || '';
 
-    if (!pipeline) {
+    if (!pipeline_name) {
       throw new this.serverless.classes.Error(`ERROR: Must define a name for pipeline!`);
     }
 
     if (!processors) {
-      throw new this.serverless.classes.Error(`ERROR: Must define processors for '${pipeline}' pipeline!`);
+      throw new this.serverless.classes.Error(`ERROR: Must define processors for '${pipeline_name}' pipeline!`);
     }
 
     const formatted_processors = [];
@@ -170,7 +171,7 @@ class ServerlessEsLogsPlugin {
 
 
     const createPipelineRequestOptions: AxiosRequestConfig = {
-      url: `https://${endpoint}/_ingest/pipeline/${pipeline}`,
+      url: `https://${endpoint}/_ingest/pipeline/${pipeline_name}`,
       method: 'PUT',
       data: {
         "description" : description || "Pipeline created by serverless-es-logs.",
@@ -181,12 +182,15 @@ class ServerlessEsLogsPlugin {
       }
     };
 
-    console.log(JSON.stringify(createPipelineRequestOptions));
-
+    if (process.env.SLS_DEBUG) {
+      this.serverless.cli.log(
+        `Creating pipeline ${pipeline_name} with following processors:\n${JSON.stringify(formatted_processors, null, 2)}`
+      )
+    }
     const signedPipelineRequest = aws_v4_signer.sign(
       {
         hostname: endpoint,
-        path: `/_ingest/pipeline/${pipeline}`,
+        path: `/_ingest/pipeline/${pipeline_name}`,
         method: 'PUT',
         body: JSON.stringify(createPipelineRequestOptions.data),
         headers: createPipelineRequestOptions.headers
@@ -202,7 +206,7 @@ class ServerlessEsLogsPlugin {
       throw error;
     }
 
-    this.serverless.cli.log(`Pipeline ${pipeline} successfully created!`);
+    this.serverless.cli.log(`Pipeline ${pipeline_name} successfully created/updated!`);
   }
 
   private async addApiGwCloudwatchSubscription(): Promise<void> {
@@ -210,10 +214,6 @@ class ServerlessEsLogsPlugin {
     const filterPattern = esLogs.apiGWFilterPattern || this.defaultApiGWFilterPattern;
     const apiGwLogGroupLogicalId = 'ApiGatewayLogGroup';
     const template = this.serverless.service.provider.compiledCloudFormationTemplate;
-
-    // Check if API Gateway log group exists
-    /* istanbul ignore else */
-    await this.createApiGatewayElasticsearchPipeline();
 
     if (template && template.Resources[apiGwLogGroupLogicalId]) {
       const { LogGroupName } = template.Resources[apiGwLogGroupLogicalId].Properties;
@@ -349,15 +349,15 @@ class ServerlessEsLogsPlugin {
     const filePath = path.join(dirPath, 'index.js');
     const handler = `${this.logProcesserDir}/index.handler`;
     const name = `${this.serverless.service.service}-${this.options.stage}-es-logs-plugin`;
-    const apiGatewayAccessLogsGrokPipeline = this.custom().esLogs.apiGatewayAccessLogsGrokPipeline || {};
-    const apiGatewayAccessLogsGrokPipelineName = apiGatewayAccessLogsGrokPipeline.name || '';
+    const pipeline = this.custom().esLogs.pipeline || {};
+    const pipeline_name = pipeline.name || '';
     fs.ensureDirSync(dirPath);
     fs.copySync(path.resolve(__dirname, '../templates/code/logsToEs.js'), filePath);
     this.serverless.service.functions[this.logProcesserName] = {
       description: 'Serverless ES Logs Plugin',
       environment: {
         ES_ENDPOINT: endpoint,
-        ES_APIGATEWAY_PIPELINE: apiGatewayAccessLogsGrokPipelineName,
+        ES_PIPELINE: pipeline_name,
         ES_INDEX_PREFIX: index,
         ES_TAGS: tagsStringified,
       },

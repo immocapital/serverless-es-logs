@@ -19,7 +19,7 @@ declare class ServerlessEsLogsPlugin {
     private mergeCustomProviderResources;
     private formatCommandLineOpts;
     private validatePluginOptions;
-    private createApiGatewayElasticsearchPipeline;
+    private createElasticsearchPipeline;
     private addApiGwCloudwatchSubscription;
     private addLambdaCloudwatchSubscriptions;
     private configureLogRetention;
