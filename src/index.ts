@@ -33,7 +33,7 @@ class ServerlessEsLogsPlugin {
       'after:package:initialize': this.afterPackageInitialize.bind(this),
       'after:package:createDeploymentArtifacts': this.afterPackageCreateDeploymentArtifacts.bind(this),
       'aws:package:finalize:mergeCustomProviderResources': this.mergeCustomProviderResources.bind(this),
-      'after:deploy:finalize': this.createElasticsearchPipeline.bind(this),
+      'before:package:initialize': this.createElasticsearchPipeline.bind(this),
     };
     // tslint:enable:object-literal-sort-keys
   }
@@ -136,7 +136,7 @@ class ServerlessEsLogsPlugin {
     const endpoint: string = esLogs.endpoint;
     const pipeline_name: string = esLogs.pipeline.name || '';
     const processors: any[] = esLogs.pipeline.processors || [];
-    const description: string = esLogs.pipeline.description || '';
+    const description: string = esLogs.pipeline.description || 'Pipeline created by serverless-es-logs.';
 
     if (!pipeline_name) {
       throw new this.serverless.classes.Error(`ERROR: Must define a name for pipeline!`);
@@ -144,21 +144,6 @@ class ServerlessEsLogsPlugin {
 
     if (!processors) {
       throw new this.serverless.classes.Error(`ERROR: Must define processors for '${pipeline_name}' pipeline!`);
-    }
-
-    const formatted_processors = [];
-    for (const processor of processors) {
-      if (!processor.type) {
-        throw new this.serverless.classes.Error(`ERROR: Missing attribute 'type' for processor!`);
-      }
-
-      if (!processor.options) {
-        throw new this.serverless.classes.Error(`ERROR: Missing attribute 'options' for processor!`);
-      }
-
-      let formatted_processor: { [processor_type: string]: any[] } = {};
-      formatted_processor[processor.type] = processor.options;
-      formatted_processors.push(formatted_processor);
     }
 
     const sts = new aws.STS();
@@ -174,8 +159,8 @@ class ServerlessEsLogsPlugin {
       url: `https://${endpoint}/_ingest/pipeline/${pipeline_name}`,
       method: 'PUT',
       data: {
-        "description" : description || "Pipeline created by serverless-es-logs.",
-        "processors": formatted_processors
+        'description' : description,
+        'processors': processors
       },
       headers: {
         'Content-Type': 'application/json'
@@ -184,7 +169,7 @@ class ServerlessEsLogsPlugin {
 
     if (process.env.SLS_DEBUG) {
       this.serverless.cli.log(
-        `Creating pipeline ${pipeline_name} with following processors:\n${JSON.stringify(formatted_processors, null, 2)}`
+        `Creating pipeline ${pipeline_name} with following processors:\n${JSON.stringify(processors, null, 2)}`
       )
     }
     const signedPipelineRequest = aws_v4_signer.sign(
@@ -203,6 +188,7 @@ class ServerlessEsLogsPlugin {
     try {
       await axios(createPipelineRequestOptions);
     } catch (error) {
+      this.serverless.cli.log(`Failed to create Elasticsearch pipeline. Response: ${JSON.stringify(error.response.data, null, 2)}`)
       throw error;
     }
 
