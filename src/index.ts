@@ -62,34 +62,24 @@ class ServerlessEsLogsPlugin {
 
   private async afterDeployFinalize(): Promise<void> {
     const { esLogs } = this.custom();
-    if (!esLogs.pipelines) {
+    if (!esLogs.pipeline) {
       return;
     }
 
-    if (!(esLogs.pipelines instanceof Array)) {
-      throw new this.serverless.classes.Error(`ERROR: Must define an array of pipelines!`);
-    }
-
     const endpoint: string = esLogs.endpoint;
-    const promises: Promise<void>[] = []
+    const pipeline_name: string = esLogs.pipeline.name || '';
+    const processors: any[] = esLogs.pipeline.processors || [];
+    const description: string = esLogs.pipeline.description || 'Pipeline created by serverless-es-logs.';
 
-    for (const pipeline of esLogs.pipelines) {
-      const pipeline_name: string = pipeline.name || '';
-      const processors: any[] = pipeline.processors || [];
-      const description: string = pipeline.description || 'Pipeline created by serverless-es-logs.';
-
-      if (!pipeline_name) {
-        throw new this.serverless.classes.Error(`ERROR: Must define 'name' for pipeline!`);
-      }
-
-      if (!processors) {
-        throw new this.serverless.classes.Error(`ERROR: Must define processors for '${pipeline_name}' pipeline!`);
-      }
-
-      promises.push(this.createElasticsearchPipeline(endpoint, pipeline_name, description, processors));
+    if (!pipeline_name) {
+      throw new this.serverless.classes.Error(`ERROR: Must define 'name' for pipeline!`);
     }
 
-    await Promise.all(promises)
+    if (!processors) {
+      throw new this.serverless.classes.Error(`ERROR: Must define processors for '${pipeline_name}' pipeline!`);
+    }
+
+    await this.createElasticsearchPipeline(endpoint, pipeline_name, description, processors);
   }
 
   private async mergeCustomProviderResources(): Promise<void> {
@@ -125,7 +115,7 @@ class ServerlessEsLogsPlugin {
 
     // Add cloudwatch subscription for API Gateway logs
     if (includeApiGWLogs === true) {
-      await this.addApiGwCloudwatchSubscription();
+      this.addApiGwCloudwatchSubscription();
     }
   }
 
@@ -215,12 +205,14 @@ class ServerlessEsLogsPlugin {
     this.serverless.cli.log(`Pipeline ${pipeline_name} successfully created/updated!`);
   }
 
-  private async addApiGwCloudwatchSubscription(): Promise<void> {
+  private addApiGwCloudwatchSubscription(): void {
     const { esLogs } = this.custom();
     const filterPattern = esLogs.apiGWFilterPattern || this.defaultApiGWFilterPattern;
     const apiGwLogGroupLogicalId = 'ApiGatewayLogGroup';
     const template = this.serverless.service.provider.compiledCloudFormationTemplate;
 
+    // Check if API Gateway log group exists
+    /* istanbul ignore else */
     if (template && template.Resources[apiGwLogGroupLogicalId]) {
       const { LogGroupName } = template.Resources[apiGwLogGroupLogicalId].Properties;
       const subscriptionLogicalId = `${apiGwLogGroupLogicalId}SubscriptionFilter`;
@@ -296,6 +288,9 @@ class ServerlessEsLogsPlugin {
       const logGroupLogicalId = `${normalizedFunctionName}LogGroup`;
       const logGroupName = template.Resources[logGroupLogicalId].Properties.LogGroupName;
 
+      // Create subscription template
+      const subscriptionTemplate = new TemplateBuilder()
+
       // Create subscription filter
       const subscriptionFilter = new SubscriptionFilterBuilder()
         .withDestinationArn({
@@ -307,11 +302,6 @@ class ServerlessEsLogsPlugin {
         .withFilterPattern(filterPattern)
         .withLogGroupName(logGroupName)
         .withDependsOn([ this.logProcesserLogicalId, logGroupLogicalId ])
-        .build();
-
-      // Create subscription template
-      const subscriptionTemplate = new TemplateBuilder()
-        .withResource(subscriptionLogicalId, subscriptionFilter)
 
       if (!mergePermissionForSubscriptionFilter) {
         // Create permission for subscription filter
@@ -335,12 +325,13 @@ class ServerlessEsLogsPlugin {
           .withDependsOn([ this.logProcesserLogicalId, logGroupLogicalId ])
           .build();
 
+        // Replace subscription filter dependencies to include this permission
+        subscriptionFilter.withDependsOn([ this.logProcesserLogicalId, permissionLogicalId ]);
         subscriptionTemplate.withResource(permissionLogicalId, permission);
       }
 
-      subscriptionTemplate.build();
-
-      _.merge(template, subscriptionTemplate);
+      subscriptionTemplate.withResource(subscriptionLogicalId, subscriptionFilter.build())
+      _.merge(template, subscriptionTemplate.build());
     });
 
     if (mergePermissionForSubscriptionFilter) {

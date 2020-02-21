@@ -63,27 +63,20 @@ class ServerlessEsLogsPlugin {
     afterDeployFinalize() {
         return __awaiter(this, void 0, void 0, function* () {
             const { esLogs } = this.custom();
-            if (!esLogs.pipelines) {
+            if (!esLogs.pipeline) {
                 return;
             }
-            if (!(esLogs.pipelines instanceof Array)) {
-                throw new this.serverless.classes.Error(`ERROR: Must define an array of pipelines!`);
-            }
             const endpoint = esLogs.endpoint;
-            const promises = [];
-            for (const pipeline of esLogs.pipelines) {
-                const pipeline_name = pipeline.name || '';
-                const processors = pipeline.processors || [];
-                const description = pipeline.description || 'Pipeline created by serverless-es-logs.';
-                if (!pipeline_name) {
-                    throw new this.serverless.classes.Error(`ERROR: Must define 'name' for pipeline!`);
-                }
-                if (!processors) {
-                    throw new this.serverless.classes.Error(`ERROR: Must define processors for '${pipeline_name}' pipeline!`);
-                }
-                promises.push(this.createElasticsearchPipeline(endpoint, pipeline_name, description, processors));
+            const pipeline_name = esLogs.pipeline.name || '';
+            const processors = esLogs.pipeline.processors || [];
+            const description = esLogs.pipeline.description || 'Pipeline created by serverless-es-logs.';
+            if (!pipeline_name) {
+                throw new this.serverless.classes.Error(`ERROR: Must define 'name' for pipeline!`);
             }
-            yield Promise.all(promises);
+            if (!processors) {
+                throw new this.serverless.classes.Error(`ERROR: Must define processors for '${pipeline_name}' pipeline!`);
+            }
+            yield this.createElasticsearchPipeline(endpoint, pipeline_name, description, processors);
         });
     }
     mergeCustomProviderResources() {
@@ -114,7 +107,7 @@ class ServerlessEsLogsPlugin {
             }
             // Add cloudwatch subscription for API Gateway logs
             if (includeApiGWLogs === true) {
-                yield this.addApiGwCloudwatchSubscription();
+                this.addApiGwCloudwatchSubscription();
             }
         });
     }
@@ -186,62 +179,62 @@ class ServerlessEsLogsPlugin {
         });
     }
     addApiGwCloudwatchSubscription() {
-        return __awaiter(this, void 0, void 0, function* () {
-            const { esLogs } = this.custom();
-            const filterPattern = esLogs.apiGWFilterPattern || this.defaultApiGWFilterPattern;
-            const apiGwLogGroupLogicalId = 'ApiGatewayLogGroup';
-            const template = this.serverless.service.provider.compiledCloudFormationTemplate;
-            if (template && template.Resources[apiGwLogGroupLogicalId]) {
-                const { LogGroupName } = template.Resources[apiGwLogGroupLogicalId].Properties;
-                const subscriptionLogicalId = `${apiGwLogGroupLogicalId}SubscriptionFilter`;
-                const permissionLogicalId = `${apiGwLogGroupLogicalId}CWPermission`;
-                const processorFunctionName = template.Resources[this.logProcesserLogicalId].Properties.FunctionName;
-                // Create permission for subscription filter
-                const permission = new utils_1.LambdaPermissionBuilder()
-                    .withFunctionName(processorFunctionName)
-                    .withPrincipal({
-                    'Fn::Sub': 'logs.${AWS::Region}.amazonaws.com',
-                })
-                    .withSourceArn({
-                    'Fn::Join': [
-                        '',
-                        [
-                            'arn:aws:logs:',
-                            {
-                                Ref: 'AWS::Region',
-                            },
-                            ':',
-                            {
-                                Ref: 'AWS::AccountId',
-                            },
-                            ':log-group:',
-                            LogGroupName,
-                            '*',
-                        ],
+        const { esLogs } = this.custom();
+        const filterPattern = esLogs.apiGWFilterPattern || this.defaultApiGWFilterPattern;
+        const apiGwLogGroupLogicalId = 'ApiGatewayLogGroup';
+        const template = this.serverless.service.provider.compiledCloudFormationTemplate;
+        // Check if API Gateway log group exists
+        /* istanbul ignore else */
+        if (template && template.Resources[apiGwLogGroupLogicalId]) {
+            const { LogGroupName } = template.Resources[apiGwLogGroupLogicalId].Properties;
+            const subscriptionLogicalId = `${apiGwLogGroupLogicalId}SubscriptionFilter`;
+            const permissionLogicalId = `${apiGwLogGroupLogicalId}CWPermission`;
+            const processorFunctionName = template.Resources[this.logProcesserLogicalId].Properties.FunctionName;
+            // Create permission for subscription filter
+            const permission = new utils_1.LambdaPermissionBuilder()
+                .withFunctionName(processorFunctionName)
+                .withPrincipal({
+                'Fn::Sub': 'logs.${AWS::Region}.amazonaws.com',
+            })
+                .withSourceArn({
+                'Fn::Join': [
+                    '',
+                    [
+                        'arn:aws:logs:',
+                        {
+                            Ref: 'AWS::Region',
+                        },
+                        ':',
+                        {
+                            Ref: 'AWS::AccountId',
+                        },
+                        ':log-group:',
+                        LogGroupName,
+                        '*',
                     ],
-                })
-                    .withDependsOn([this.logProcesserLogicalId, apiGwLogGroupLogicalId])
-                    .build();
-                // Create subscription filter
-                const subscriptionFilter = new utils_1.SubscriptionFilterBuilder()
-                    .withDestinationArn({
-                    'Fn::GetAtt': [
-                        this.logProcesserLogicalId,
-                        'Arn',
-                    ],
-                })
-                    .withFilterPattern(filterPattern)
-                    .withLogGroupName(LogGroupName)
-                    .withDependsOn([this.logProcesserLogicalId, permissionLogicalId])
-                    .build();
-                // Create subscription template
-                const subscriptionTemplate = new utils_1.TemplateBuilder()
-                    .withResource(permissionLogicalId, permission)
-                    .withResource(subscriptionLogicalId, subscriptionFilter)
-                    .build();
-                lodash_1.default.merge(template, subscriptionTemplate);
-            }
-        });
+                ],
+            })
+                .withDependsOn([this.logProcesserLogicalId, apiGwLogGroupLogicalId])
+                .build();
+            // Create subscription filter
+            const subscriptionFilter = new utils_1.SubscriptionFilterBuilder()
+                .withDestinationArn({
+                'Fn::GetAtt': [
+                    this.logProcesserLogicalId,
+                    'Arn',
+                ],
+            })
+                .withFilterPattern(filterPattern)
+                .withLogGroupName(LogGroupName)
+                .withDependsOn([this.logProcesserLogicalId, permissionLogicalId])
+                .build();
+            // Create subscription template
+            const subscriptionTemplate = new utils_1.TemplateBuilder()
+                .withResource(permissionLogicalId, permission)
+                .withResource(subscriptionLogicalId, subscriptionFilter)
+                .build();
+            lodash_1.default.merge(template, subscriptionTemplate);
+        }
     }
     addLambdaCloudwatchSubscriptions() {
         const { esLogs } = this.custom();
@@ -259,6 +252,8 @@ class ServerlessEsLogsPlugin {
             const subscriptionLogicalId = `${normalizedFunctionName}SubscriptionFilter`;
             const logGroupLogicalId = `${normalizedFunctionName}LogGroup`;
             const logGroupName = template.Resources[logGroupLogicalId].Properties.LogGroupName;
+            // Create subscription template
+            const subscriptionTemplate = new utils_1.TemplateBuilder();
             // Create subscription filter
             const subscriptionFilter = new utils_1.SubscriptionFilterBuilder()
                 .withDestinationArn({
@@ -269,11 +264,7 @@ class ServerlessEsLogsPlugin {
             })
                 .withFilterPattern(filterPattern)
                 .withLogGroupName(logGroupName)
-                .withDependsOn([this.logProcesserLogicalId, logGroupLogicalId])
-                .build();
-            // Create subscription template
-            const subscriptionTemplate = new utils_1.TemplateBuilder()
-                .withResource(subscriptionLogicalId, subscriptionFilter);
+                .withDependsOn([this.logProcesserLogicalId, logGroupLogicalId]);
             if (!mergePermissionForSubscriptionFilter) {
                 // Create permission for subscription filter
                 const permissionLogicalId = `${normalizedFunctionName}CWPermission`;
@@ -295,10 +286,12 @@ class ServerlessEsLogsPlugin {
                 })
                     .withDependsOn([this.logProcesserLogicalId, logGroupLogicalId])
                     .build();
+                // Replace subscription filter dependencies to include this permission
+                subscriptionFilter.withDependsOn([this.logProcesserLogicalId, permissionLogicalId]);
                 subscriptionTemplate.withResource(permissionLogicalId, permission);
             }
-            subscriptionTemplate.build();
-            lodash_1.default.merge(template, subscriptionTemplate);
+            subscriptionTemplate.withResource(subscriptionLogicalId, subscriptionFilter.build());
+            lodash_1.default.merge(template, subscriptionTemplate.build());
         });
         if (mergePermissionForSubscriptionFilter) {
             const logicalId = 'ServerlessEsLogsCWPermission';
