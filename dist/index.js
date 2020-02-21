@@ -28,6 +28,7 @@ class ServerlessEsLogsPlugin {
         this.logProcesserName = 'esLogsProcesser';
         this.defaultLambdaFilterPattern = '[timestamp=*Z, request_id="*-*", event]';
         this.defaultApiGWFilterPattern = '[event]';
+        this.defaultMergePermissionForSubscriptionFilter = false;
         this.serverless = serverless;
         this.provider = serverless.getProvider('aws');
         this.options = options;
@@ -37,8 +38,8 @@ class ServerlessEsLogsPlugin {
         this.hooks = {
             'after:package:initialize': this.afterPackageInitialize.bind(this),
             'after:package:createDeploymentArtifacts': this.afterPackageCreateDeploymentArtifacts.bind(this),
+            'after:deploy:finalize': this.afterDeployFinalize.bind(this),
             'aws:package:finalize:mergeCustomProviderResources': this.mergeCustomProviderResources.bind(this),
-            'before:package:initialize': this.createElasticsearchPipeline.bind(this),
         };
         // tslint:enable:object-literal-sort-keys
     }
@@ -58,6 +59,32 @@ class ServerlessEsLogsPlugin {
         // Add log processing lambda
         // TODO: Find the right lifecycle method for this
         this.addLogProcesser();
+    }
+    afterDeployFinalize() {
+        return __awaiter(this, void 0, void 0, function* () {
+            const { esLogs } = this.custom();
+            if (!esLogs.pipelines) {
+                return;
+            }
+            if (!(esLogs.pipelines instanceof Array)) {
+                throw new this.serverless.classes.Error(`ERROR: Must define an array of pipelines!`);
+            }
+            const endpoint = esLogs.endpoint;
+            const promises = [];
+            for (const pipeline of esLogs.pipelines) {
+                const pipeline_name = pipeline.name || '';
+                const processors = pipeline.processors || [];
+                const description = pipeline.description || 'Pipeline created by serverless-es-logs.';
+                if (!pipeline_name) {
+                    throw new this.serverless.classes.Error(`ERROR: Must define 'name' for pipeline!`);
+                }
+                if (!processors) {
+                    throw new this.serverless.classes.Error(`ERROR: Must define processors for '${pipeline_name}' pipeline!`);
+                }
+                promises.push(this.createElasticsearchPipeline(endpoint, pipeline_name, description, processors));
+            }
+            yield Promise.all(promises);
+        });
     }
     mergeCustomProviderResources() {
         return __awaiter(this, void 0, void 0, function* () {
@@ -117,22 +144,8 @@ class ServerlessEsLogsPlugin {
             throw new this.serverless.classes.Error(`ERROR: Tags must be an object! You provided '${tags}'.`);
         }
     }
-    createElasticsearchPipeline() {
+    createElasticsearchPipeline(endpoint, pipeline_name, description, processors) {
         return __awaiter(this, void 0, void 0, function* () {
-            const { esLogs } = this.custom();
-            if (!esLogs.pipeline) {
-                return;
-            }
-            const endpoint = esLogs.endpoint;
-            const pipeline_name = esLogs.pipeline.name || '';
-            const processors = esLogs.pipeline.processors || [];
-            const description = esLogs.pipeline.description || 'Pipeline created by serverless-es-logs.';
-            if (!pipeline_name) {
-                throw new this.serverless.classes.Error(`ERROR: Must define a name for pipeline!`);
-            }
-            if (!processors) {
-                throw new this.serverless.classes.Error(`ERROR: Must define processors for '${pipeline_name}' pipeline!`);
-            }
             const sts = new aws.STS();
             const session_token = yield sts.getSessionToken().promise();
             const credentials = {
@@ -235,6 +248,7 @@ class ServerlessEsLogsPlugin {
         const filterPattern = esLogs.filterPattern || this.defaultLambdaFilterPattern;
         const template = this.serverless.service.provider.compiledCloudFormationTemplate;
         const functions = this.serverless.service.getAllFunctions();
+        const mergePermissionForSubscriptionFilter = esLogs.mergePermissionForSubscriptionFilter || this.defaultMergePermissionForSubscriptionFilter;
         // Add cloudwatch subscription for each function except log processer
         functions.forEach((name) => {
             /* istanbul ignore if */
@@ -243,28 +257,8 @@ class ServerlessEsLogsPlugin {
             }
             const normalizedFunctionName = this.provider.naming.getNormalizedFunctionName(name);
             const subscriptionLogicalId = `${normalizedFunctionName}SubscriptionFilter`;
-            // const permissionLogicalId = `${normalizedFunctionName}CWPermission`;
             const logGroupLogicalId = `${normalizedFunctionName}LogGroup`;
             const logGroupName = template.Resources[logGroupLogicalId].Properties.LogGroupName;
-            // Create permission for subscription filter
-            // const permission = new LambdaPermissionBuilder()
-            //   .withFunctionName({
-            //     'Fn::GetAtt': [
-            //       this.logProcesserLogicalId,
-            //       'Arn',
-            //     ],
-            //   })
-            //   .withPrincipal({
-            //     'Fn::Sub': 'logs.${AWS::Region}.amazonaws.com',
-            //   })
-            //   .withSourceArn({
-            //     'Fn::GetAtt': [
-            //       logGroupLogicalId,
-            //       'Arn',
-            //     ],
-            //   })
-            //   .withDependsOn([ this.logProcesserLogicalId, logGroupLogicalId ])
-            //   .build();
             // Create subscription filter
             const subscriptionFilter = new utils_1.SubscriptionFilterBuilder()
                 .withDestinationArn({
@@ -279,11 +273,73 @@ class ServerlessEsLogsPlugin {
                 .build();
             // Create subscription template
             const subscriptionTemplate = new utils_1.TemplateBuilder()
-                // .withResource(permissionLogicalId, permission)
-                .withResource(subscriptionLogicalId, subscriptionFilter)
-                .build();
+                .withResource(subscriptionLogicalId, subscriptionFilter);
+            if (!mergePermissionForSubscriptionFilter) {
+                // Create permission for subscription filter
+                const permissionLogicalId = `${normalizedFunctionName}CWPermission`;
+                const permission = new utils_1.LambdaPermissionBuilder()
+                    .withFunctionName({
+                    'Fn::GetAtt': [
+                        this.logProcesserLogicalId,
+                        'Arn',
+                    ],
+                })
+                    .withPrincipal({
+                    'Fn::Sub': 'logs.${AWS::Region}.amazonaws.com',
+                })
+                    .withSourceArn({
+                    'Fn::GetAtt': [
+                        logGroupLogicalId,
+                        'Arn',
+                    ],
+                })
+                    .withDependsOn([this.logProcesserLogicalId, logGroupLogicalId])
+                    .build();
+                subscriptionTemplate.withResource(permissionLogicalId, permission);
+            }
+            subscriptionTemplate.build();
             lodash_1.default.merge(template, subscriptionTemplate);
         });
+        if (mergePermissionForSubscriptionFilter) {
+            const logicalId = 'ServerlessEsLogsCWPermission';
+            const permission = new utils_1.LambdaPermissionBuilder()
+                .withFunctionName({
+                'Fn::GetAtt': [
+                    this.logProcesserLogicalId,
+                    'Arn',
+                ],
+            })
+                .withPrincipal({
+                'Fn::Sub': 'logs.${AWS::Region}.amazonaws.com',
+            })
+                .withSourceArn({
+                'Fn::Join': [
+                    '',
+                    [
+                        'arn:aws:logs:',
+                        {
+                            Ref: 'AWS::Region',
+                        },
+                        ':',
+                        {
+                            Ref: 'AWS::AccountId',
+                        },
+                        ':log-group:',
+                        this.serverless.service.service,
+                        '-',
+                        this.serverless.service.provider.stage,
+                        '-',
+                        '*',
+                    ],
+                ],
+            })
+                .withDependsOn([this.logProcesserLogicalId])
+                .build();
+            const permissionsTemplate = new utils_1.TemplateBuilder()
+                .withResource(logicalId, permission)
+                .build();
+            lodash_1.default.merge(template, permissionsTemplate);
+        }
     }
     configureLogRetention(retentionInDays) {
         const template = this.serverless.service.provider.compiledCloudFormationTemplate;
