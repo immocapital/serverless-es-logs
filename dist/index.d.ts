@@ -10,12 +10,14 @@ declare class ServerlessEsLogsPlugin {
     private logProcesserLogicalId;
     private defaultLambdaFilterPattern;
     private defaultApiGWFilterPattern;
+    private defaultMergePermissionForSubscriptionFilter;
     constructor(serverless: any, options: {
         [name: string]: any;
     });
     private custom;
     private afterPackageCreateDeploymentArtifacts;
     private afterPackageInitialize;
+    private afterDeployFinalize;
     private mergeCustomProviderResources;
     private formatCommandLineOpts;
     private validatePluginOptions;
