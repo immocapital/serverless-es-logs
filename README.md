@@ -148,7 +148,7 @@ provider:
 
 #### xrayTracingPermissions
 
-(Optional) Adds AWS Xray writing permissions to the processor lambda. You will need these if you enable tracing for ApiGateway on your service. 
+(Optional) Adds AWS Xray writing permissions to the processor lambda. You will need these if you enable tracing for ApiGateway on your service.
 
 ```yaml
 custom:
@@ -158,6 +158,40 @@ custom:
 provider:
   tracing:
     apiGateway: true
+```
+
+#### mergePermissionForSubscriptionFilter
+
+(Optional) Merge Subscription Filter `InvokeLambda` permissions in a single statement. Use this if
+you run into issues with role sizes, which happens when you have too many endpoints.
+
+```yaml
+custom:
+  esLogs:
+    mergePermissionForSubscriptionFilter: true
+```
+
+#### pipelines
+(Optional) Define ingestion pipelines as documented in https://www.elastic.co/guide/en/elasticsearch/reference/current/pipeline.html.
+Beware that the plugin won't delete pipelines when their definitions are removed from `serverless.yml`
+
+```yaml
+pipelines:
+  - name: ${self:provider.stage}-${self:service}
+    processors:
+      - grok:
+          field : '@message'
+          patterns:
+            - '^requestId: %{UUID:requestId}, ip: %{IP:ip}, caller: %{GREEDYDATA:caller}, user: %{USER:user}, requestTime: %{HTTPDATE:requestTime}, httpMethod: %{WORD:httpMethod}, resourcePath: %{URIPATHPARAM:resourcePath}, status: %{NUMBER:status:int}, protocol: %{GREEDYDATA:protocol}, responseLength: %{GREEDYDATA:responseLength}, integrationLatency: %{GREEDYDATA:integrationLatency}, authorizerIntegrationLatency: %{GREEDYDATA:authorizerIntegrationLatency}, responseLatency: %{GREEDYDATA:responseLatency}$'
+          ignore_failure: true
+
+      - convert:
+          field: 'authorizerIntegrationLatency'
+          type: 'integer'
+          ignore_missing: true
+          on_failure:
+            - remove:
+                field: 'authorizerIntegrationLatency'
 ```
 
 [sls-image]:http://public.serverless.com/badges/v3.svg
