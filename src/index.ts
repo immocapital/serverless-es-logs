@@ -359,6 +359,7 @@ class ServerlessEsLogsPlugin {
                   Ref: 'AWS::AccountId',
                 },
                 ':log-group:',
+                '/aws/lambda/',
                 this.serverless.service.service,
                 '-',
                 this.serverless.service.provider.stage,
