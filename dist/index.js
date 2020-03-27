@@ -138,6 +138,7 @@ class ServerlessEsLogsPlugin {
         }
     }
     createElasticsearchPipeline(endpoint, pipeline_name, description, processors) {
+        var _a;
         return __awaiter(this, void 0, void 0, function* () {
             const sts = new aws.STS();
             const session_token = yield sts.getSessionToken().promise();
@@ -172,7 +173,7 @@ class ServerlessEsLogsPlugin {
                 yield axios_1.default(createPipelineRequestOptions);
             }
             catch (error) {
-                this.serverless.cli.log(`Failed to create Elasticsearch pipeline. Response: ${JSON.stringify(error.response.data, null, 2)}`);
+                this.serverless.cli.log(`Failed to create Elasticsearch pipeline. Response: ${JSON.stringify((_a = error.response) === null || _a === void 0 ? void 0 : _a.data, null, 2)}`);
                 throw error;
             }
             this.serverless.cli.log(`Pipeline ${pipeline_name} successfully created/updated!`);

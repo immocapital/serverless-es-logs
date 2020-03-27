@@ -198,7 +198,7 @@ class ServerlessEsLogsPlugin {
     try {
       await axios(createPipelineRequestOptions);
     } catch (error) {
-      this.serverless.cli.log(`Failed to create Elasticsearch pipeline. Response: ${JSON.stringify(error.response.data, null, 2)}`)
+      this.serverless.cli.log(`Failed to create Elasticsearch pipeline. Response: ${JSON.stringify(error.response?.data, null, 2)}`)
       throw error;
     }
 
